@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grimes L1 Graph</title>
+<style>
+  :root { --bg:#0b0d10; --panel:rgba(20,24,30,.9); --text:#e8eaed; --muted:#9aa3ad; --accent:#ff8a3d; --border:rgba(255,255,255,.12); }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--text); font:13px/1.4 system-ui,-apple-system,sans-serif; overflow:hidden; }
+  #panel { position:fixed; top:12px; left:12px; z-index:10; background:var(--panel); border:1px solid var(--border);
+           border-radius:10px; padding:12px; width:270px; }
+  h1 { font-size:14px; margin:0 0 8px; }
+  .row { display:flex; gap:6px; margin:6px 0; align-items:center; flex-wrap:wrap; }
+  button, select { background:#1d232b; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:5px 8px; font:inherit; cursor:pointer; }
+  button.on { border-color:var(--accent); color:var(--accent); }
+  select { flex:1; min-width:0; }
+  label { display:flex; gap:5px; align-items:center; cursor:pointer; }
+  .key { display:grid; grid-template-columns:auto 1fr; gap:3px 8px; margin-top:8px; font-size:12px; color:var(--muted); }
+  .sw { width:12px; height:12px; border-radius:50%; margin-top:2px; }
+  .help { color:var(--muted); font-size:12px; margin-top:8px; }
+  .help b { color:var(--text); font-weight:600; }
+  #status { color:var(--muted); font-size:12px; margin-top:6px; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "@mkkellogg/gaussian-splats-3d": "https://cdn.jsdelivr.net/npm/@mkkellogg/gaussian-splats-3d@0.4.7/build/gaussian-splats-3d.module.js"
+} }
+</script>
+</head>
+<body>
+<div id="panel">
+  <h1>Grimes L1 — graph in the splat</h1>
+  <div class="row">
+    <button id="mTop">Top-down (no ceiling)</button>
+    <button id="mWalk">Walk inside</button>
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="cEdges" checked> edges</label>
+    <label><input type="checkbox" id="cNodes" checked> nodes</label>
+  </div>
+  <div class="row" id="jumpRow">
+    <button id="prev">◀</button>
+    <select id="pano"></select>
+    <button id="next">▶</button>
+  </div>
+  <div class="key">
+    <span class="sw" style="background:#3d7bff"></span><span>junction (big) / path (small)</span>
+    <span class="sw" style="background:#a46bff"></span><span>endpoint (dead end)</span>
+    <span class="sw" style="background:#ff8a3d"></span><span>photo spot (walked)</span>
+    <span class="sw" style="background:#ff3b5c"></span><span>edge with &gt;0.3 m height change</span>
+  </div>
+  <div class="help" id="help"></div>
+  <div id="status">Loading…</div>
+</div>
+<script type="module">
+import * as THREE from "three";
+import * as GS from "@mkkellogg/gaussian-splats-3d";
+
+const EYE = 1.38, DATA = "../data/L1/";
+const q = new URLSearchParams(location.search);
+const mode = q.get("mode") === "walk" ? "walk" : "top";
+const $ = id => document.getElementById(id);
+$("mTop").classList.toggle("on", mode === "top");
+$("mWalk").classList.toggle("on", mode === "walk");
+const go = (m, i) => { location.search = `?mode=${m}&pano=${i}`; };
+$("mTop").onclick = () => go("top", cur);
+$("mWalk").onclick = () => go("walk", cur);
+$("help").innerHTML = mode === "walk"
+  ? "<b>Drag</b> to look around (like Street View) · <b>W/S</b> or <b>scroll</b> forward/back · <b>A/D</b> sidestep · <b>←/→</b> turn · <b>Shift</b> faster · <b>click a ball</b> to jump there · <b>◀ ▶</b> next photo spot"
+  : "<b>Drag</b> rotate · <b>right-drag</b> pan · <b>scroll</b> zoom · <b>click a node</b> to walk in from there";
+
+const g = await (await fetch(DATA + "graph_L1.json")).json();
+const byId = Object.fromEntries(g.nodes.map(n => [n.id, n]));
+const photos = g.nodes.filter(n => n.type === "walked").sort((a, b) => a.id.localeCompare(b.id));
+photos.forEach((p, i) => $("pano").add(new Option(`Photo ${p.id.slice(5)}  (${p.image})`, i)));
+let cur = Math.max(0, Math.min(photos.length - 1, parseInt(q.get("pano") || "0", 10) || 0));
+$("pano").value = cur;
+
+// ---- graph as 3D geometry ----
+const scene = new THREE.Scene();
+const LIFT = 0.06, edges = new THREE.Group(), nodes = new THREE.Group();
+const up = new THREE.Vector3(0, 1, 0);
+const cyl = new THREE.CylinderGeometry(1, 1, 1, 8);
+const mat = c => new THREE.MeshBasicMaterial({ color: c });
+const mEdge = mat(0x3d7bff), mLevel = mat(0xff3b5c);
+const R = mode === "top" ? 0.06 : 0.02;
+for (const e of g.edges) {
+  const a = byId[e.from], b = byId[e.to];
+  const A = new THREE.Vector3(a.x, a.y, a.z + LIFT), B = new THREE.Vector3(b.x, b.y, b.z + LIFT);
+  const d = new THREE.Vector3().subVectors(B, A), L = d.length();
+  if (L < 1e-3) continue;
+  const m = new THREE.Mesh(cyl, Math.abs(a.z - b.z) > 0.3 ? mLevel : mEdge);
+  m.scale.set(R, L, R);
+  m.position.copy(A).addScaledVector(d, 0.5);
+  m.quaternion.setFromUnitVectors(up, d.normalize());
+  edges.add(m);
+}
+const sph = new THREE.SphereGeometry(1, 14, 10);
+const style = { junction: [0x3d7bff, 0.16], path: [0x7fa8ff, 0.08], endpoint: [0xa46bff, 0.14], walked: [0xff8a3d, 0.17] };
+const k = mode === "top" ? 1.6 : 0.5;
+const pickable = [];
+for (const n of g.nodes) {
+  const [c, r] = style[n.type] || [0xffffff, 0.1];
+  const m = new THREE.Mesh(sph, mat(c));
+  m.scale.setScalar(r * k);
+  m.position.set(n.x, n.y, n.z + LIFT);
+  m.userData.node = n;
+  nodes.add(m); pickable.push(m);
+}
+scene.add(edges, nodes);
+$("cEdges").onchange = e => { edges.visible = e.target.checked; };
+$("cNodes").onchange = e => { nodes.visible = e.target.checked; };
+
+// ---- splat viewer ----
+const heading = i => {
+  const [a, b] = i < photos.length - 1 ? [photos[i], photos[i + 1]] : [photos[i - 1], photos[i]];
+  return Math.atan2(b.y - a.y, b.x - a.x);
+};
+const p0 = photos[cur], h0 = heading(cur), cx = 7, cy = -3;
+const viewer = new GS.Viewer({
+  cameraUp: [0, 0, 1],
+  initialCameraPosition: mode === "walk" ? [p0.x, p0.y, p0.z + EYE] : [cx, cy - 10, 50],
+  initialCameraLookAt: mode === "walk" ? [p0.x + Math.cos(h0), p0.y + Math.sin(h0), p0.z + EYE] : [cx, cy, -2],
+  threeScene: scene,
+  useBuiltInControls: mode === "top",   // walk mode uses our own first-person controls
+  sharedMemoryForWorkers: false,
+  gpuAcceleratedSort: false,
+  sphericalHarmonicsDegree: 0,
+});
+const file = mode === "walk" ? "view_full.ply" : "view_noceiling.ply";
+viewer.addSplatScene(DATA + file, { showLoadingUI: true, splatAlphaRemovalThreshold: 5, progressiveLoad: false })
+  .then(() => { viewer.start(); setup(); $("status").textContent = `${g.nodes.length} nodes, ${g.edges.length} edges · ${file}`; })
+  .catch(e => { $("status").textContent = "Load failed: " + e; console.error(e); });
+
+function setup() {
+  const cam = viewer.camera, canvas = viewer.renderer.domElement;
+  cam.up.set(0, 0, 1);
+  let yaw = h0, pitch = -0.12;                       // first-person view direction (walk mode)
+  const look = () => {
+    const d = new THREE.Vector3(Math.cos(pitch) * Math.cos(yaw), Math.cos(pitch) * Math.sin(yaw), Math.sin(pitch));
+    cam.lookAt(cam.position.clone().add(d));
+  };
+  const standAt = (x, y, z, h) => { cam.position.set(x, y, z + EYE); if (h !== undefined) yaw = h; look(); };
+  const jump = i => {
+    cur = i; $("pano").value = i;
+    if (mode === "top") return go("walk", i);
+    const p = photos[i]; standAt(p.x, p.y, p.z, heading(i));
+  };
+  if (mode === "walk") jump(cur);
+  $("pano").onchange = e => jump(+e.target.value);
+  $("prev").onclick = () => jump(Math.max(0, cur - 1));
+  $("next").onclick = () => jump(Math.min(photos.length - 1, cur + 1));
+
+  // mouse: drag = look (walk mode); a click without dragging = pick a node
+  let down = null, last = null;
+  canvas.addEventListener("pointerdown", e => { down = last = [e.clientX, e.clientY]; });
+  addEventListener("pointermove", e => {
+    if (!down || mode !== "walk") return;
+    yaw += (e.clientX - last[0]) * 0.004;            // grab-and-drag the world, like Street View
+    pitch = Math.max(-1.3, Math.min(1.3, pitch + (e.clientY - last[1]) * 0.004));
+    last = [e.clientX, e.clientY]; look();
+  });
+  addEventListener("pointerup", e => {
+    const click = down && Math.hypot(e.clientX - down[0], e.clientY - down[1]) < 4;
+    down = null;
+    if (click && e.target === canvas) pick(e);
+  });
+  if (mode === "walk") canvas.addEventListener("wheel", e => {
+    e.preventDefault();
+    cam.position.addScaledVector(new THREE.Vector3(Math.cos(yaw), Math.sin(yaw), 0), -e.deltaY * 0.004); look();
+  }, { passive: false });
+
+  // keyboard
+  const keys = new Set();
+  addEventListener("keydown", e => { if (e.target.tagName !== "SELECT") keys.add(e.code); });
+  addEventListener("keyup", e => keys.delete(e.code));
+  let t0 = performance.now();
+  (function tick(now) {
+    const dt = Math.min(0.05, (now - t0) / 1000); t0 = now;
+    if (mode === "walk" && keys.size) {
+      const f = new THREE.Vector3(Math.cos(yaw), Math.sin(yaw), 0), r = new THREE.Vector3(Math.sin(yaw), -Math.cos(yaw), 0);
+      const v = new THREE.Vector3();
+      if (keys.has("KeyW") || keys.has("ArrowUp")) v.add(f);
+      if (keys.has("KeyS") || keys.has("ArrowDown")) v.sub(f);
+      if (keys.has("KeyD")) v.add(r);
+      if (keys.has("KeyA")) v.sub(r);
+      if (keys.has("ArrowLeft")) yaw += 3.0 * dt;     // turn speed (rad/s)
+      if (keys.has("ArrowRight")) yaw -= 3.0 * dt;
+      const fast = keys.has("ShiftLeft") || keys.has("ShiftRight");
+      if (v.lengthSq()) cam.position.addScaledVector(v.normalize(), (fast ? 8 : 3.5) * dt);  // move speed (m/s)
+      look();
+    }
+    requestAnimationFrame(tick);
+  })(t0);
+
+  const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+  function pick(e) {
+    if (!nodes.visible) return;
+    const rc = canvas.getBoundingClientRect();
+    ndc.set(((e.clientX - rc.left) / rc.width) * 2 - 1, -((e.clientY - rc.top) / rc.height) * 2 + 1);
+    ray.setFromCamera(ndc, cam);
+    const hit = ray.intersectObjects(pickable)[0];
+    if (!hit) return;
+    const n = hit.object.userData.node;
+    $("status").textContent = `${n.id} · ${n.type} · floor z ${n.z.toFixed(2)} m`;
+    if (mode === "top") {
+      let best = 0, bd = Infinity;
+      photos.forEach((p, i) => { const d = Math.hypot(p.x - n.x, p.y - n.y); if (d < bd) { bd = d; best = i; } });
+      return go("walk", best);
+    }
+    standAt(n.x, n.y, n.z);                          // keep facing the same way
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+.DS_Store
+# large / team-only data (see scripts/download_data.sh)
+data/drive_ids.txt
+data/**/*.ply
+data/L1/L1_manifest.json
+data/L1/dataparser_transforms.json
