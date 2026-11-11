@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grimes L1 Graph</title>
+<style>
+  :root { --bg:#0b0d10; --panel:rgba(20,24,30,.9); --text:#e8eaed; --muted:#9aa3ad; --border:rgba(255,255,255,.12); }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--text); font:13px/1.4 system-ui,-apple-system,sans-serif; overflow:hidden; }
+  #panel { position:fixed; top:12px; left:12px; background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:12px; max-width:250px; }
+  h1 { font-size:14px; margin:0 0 8px; }
+  .key { display:grid; grid-template-columns:auto 1fr; gap:3px 8px; font-size:12px; color:var(--muted); }
+  .sw { width:11px; height:11px; border-radius:50%; margin-top:2px; }
+  label { display:flex; gap:6px; align-items:center; margin-top:8px; cursor:pointer; }
+  #info { margin-top:8px; color:var(--muted); font-size:12px; min-height:16px; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="panel">
+  <h1>Grimes L1 — navigation graph</h1>
+  <div class="key">
+    <span class="sw" style="background:#3d7bff"></span><span>junction / path</span>
+    <span class="sw" style="background:#a46bff"></span><span>dead end</span>
+    <span class="sw" style="background:#ff8a3d"></span><span>photo spot</span>
+    <span class="sw" style="background:#ff3b5c"></span><span>height change &gt;0.3 m</span>
+  </div>
+  <label><input type="checkbox" id="stretch" checked> stretch height ×3</label>
+  <div id="info">Drag to rotate · right-drag to pan · scroll to zoom</div>
+</div>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+const g = await (await fetch("data/L1/graph_L1.json")).json();
+const byId = Object.fromEntries(g.nodes.map(n => [n.id, n]));
+const cx = g.nodes.reduce((s, n) => s + n.x, 0) / g.nodes.length;
+const cy = g.nodes.reduce((s, n) => s + n.y, 0) / g.nodes.length;
+const cz = g.nodes.reduce((s, n) => s + n.z, 0) / g.nodes.length;
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0d10);
+const cam = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
+cam.up.set(0, 0, 1);
+cam.position.set(0, -55, 45);
+const ctl = new OrbitControls(cam, renderer.domElement);
+
+const world = new THREE.Group();          // graph centred at origin; scaled in z for "stretch"
+scene.add(world);
+const grid = new THREE.GridHelper(80, 40, 0x2a3038, 0x1a1f26);
+grid.rotation.x = Math.PI / 2;
+grid.position.z = -3;
+scene.add(grid);
+
+const P = n => new THREE.Vector3(n.x - cx, n.y - cy, n.z - cz);
+const pos = [], col = [], blue = new THREE.Color(0x3d7bff), red = new THREE.Color(0xff3b5c);
+for (const e of g.edges) {
+  const a = byId[e.from], b = byId[e.to], c = Math.abs(a.z - b.z) > 0.3 ? red : blue;
+  pos.push(...P(a).toArray(), ...P(b).toArray());
+  col.push(c.r, c.g, c.b, c.r, c.g, c.b);
+}
+const eg = new THREE.BufferGeometry();
+eg.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+eg.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+world.add(new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ vertexColors: true })));
+
+const style = { junction: [0x3d7bff, 0.22], path: [0x7fa8ff, 0.1], endpoint: [0xa46bff, 0.18], walked: [0xff8a3d, 0.2] };
+const sph = new THREE.SphereGeometry(1, 12, 8), balls = [];
+for (const n of g.nodes) {
+  const [c, r] = style[n.type] || [0xffffff, 0.1];
+  const m = new THREE.Mesh(sph, new THREE.MeshBasicMaterial({ color: c }));
+  m.position.copy(P(n));
+  m.scale.setScalar(r);
+  m.userData.n = n;
+  world.add(m); balls.push(m);
+}
+
+const stretch = document.getElementById("stretch");
+const applyStretch = () => {
+  const s = stretch.checked ? 3 : 1;
+  world.scale.set(1, 1, s);
+  balls.forEach(m => m.scale.set(m.scale.x, m.scale.x, m.scale.x / s));   // keep balls round
+};
+stretch.onchange = applyStretch;
+applyStretch();
+
+// hover a ball to see what it is
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), info = document.getElementById("info");
+renderer.domElement.addEventListener("pointermove", e => {
+  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, cam);
+  const hit = ray.intersectObjects(balls)[0];
+  if (hit) {
+    const n = hit.object.userData.n;
+    info.textContent = `${n.id} · ${n.type} · floor ${n.z.toFixed(2)} m${n.image ? " · " + n.image : ""}`;
+  }
+});
+
+const resize = () => { renderer.setSize(innerWidth, innerHeight); cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); };
+addEventListener("resize", resize);
+resize();
+renderer.setAnimationLoop(() => { ctl.update(); renderer.render(scene, cam); });
+</script>
+</body>
+</html>
