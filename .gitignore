@@ -4,5 +4,8 @@ __pycache__/
 # large / team-only data (see scripts/download_data.sh)
 data/drive_ids.txt
 data/**/*.ply
+# hosted on GitHub Pages for the viewer
+!data/L1/view_full.ply
+!data/L1/view_noceiling.ply
 data/L1/L1_manifest.json
 data/L1/dataparser_transforms.json

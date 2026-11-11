@@ -131,9 +131,10 @@ Edges are undirected unless `"directed": true`. `id` is generated automatically;
 GitHub repo: https://github.com/yoonoolee/fun-with-3d-buildings (public). Keep Drive IDs, photos, and `.ply` files out of it.
 - `data/L1/`:
   - In git: `pano_reg.json` (our pano→splat transform), `graph_L1.json` (graph output).
+  - Site: https://yoonoolee.github.io/fun-with-3d-buildings/ (root `index.html` redirects to `viewer/`).
   - Local only, gitignored:
     - from Drive: `splat_clean.ply`, `dataparser_transforms.json`, `L1_manifest.json`
-    - generated: `view_full.ply`, `view_noceiling.ply`
+  - Hosted publicly (committed for GitHub Pages; user decided 2026-11-10): `view_full.ply`, `view_noceiling.ply`. Regenerate them with `make_viewer_splats.py` and commit after changes.
 - `scripts/common.py`: PLY I/O, `load_splat_m()`, `panos_in_splat_m()`.
 - `scripts/build_graph.py`: the graph builder.
 - `scripts/make_viewer_splats.py`: makes the viewer splats.

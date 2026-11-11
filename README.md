@@ -2,6 +2,8 @@
 
 Indoor navigation graph for Grimes (Level 1), built from a Gaussian splat of 360° photos.
 
+Viewer: https://yoonoolee.github.io/fun-with-3d-buildings/
+
 ## Setup
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
