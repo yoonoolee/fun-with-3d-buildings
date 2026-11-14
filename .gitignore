@@ -13,4 +13,3 @@ navigation/data/L1/dataparser_transforms.json
 !navigation/data/L1/view_noceiling.ply
 !graffiti/data/*.ply
 !graffiti/data/*.bin
-!graffiti/.DS_Store
