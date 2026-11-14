@@ -1,11 +1,13 @@
 .venv/
 __pycache__/
 .DS_Store
-# large / team-only data (see scripts/download_data.sh)
-data/drive_ids.txt
-data/**/*.ply
-# hosted on GitHub Pages for the viewer
-!data/L1/view_full.ply
-!data/L1/view_noceiling.ply
-data/L1/L1_manifest.json
-data/L1/dataparser_transforms.json
+__MACOSX/
+# team-only / large data (navigation: see navigation/scripts/download_data.sh)
+navigation/data/drive_ids.txt
+*.ply
+*.bin
+navigation/data/L1/L1_manifest.json
+navigation/data/L1/dataparser_transforms.json
+# hosted on GitHub Pages for the navigation viewer
+!navigation/data/L1/view_full.ply
+!navigation/data/L1/view_noceiling.ply

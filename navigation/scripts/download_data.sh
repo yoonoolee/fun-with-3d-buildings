@@ -12,4 +12,4 @@ grep -v '^#' "$IDS" | while read -r name id; do
   echo "downloading $name"
   curl -sfL -o "data/L1/$name" "https://drive.usercontent.google.com/download?id=$id&export=download&confirm=t"
 done
-.venv/bin/python scripts/make_viewer_splats.py
+../.venv/bin/python scripts/make_viewer_splats.py

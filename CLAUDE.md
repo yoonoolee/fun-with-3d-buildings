@@ -9,15 +9,15 @@ Work on **Level 1 (L1) only** until the whole pipeline works end to end.
 |---|---|---|
 | 1. Capture | Done (Cupix scan, Oct 18). | — |
 | 2. Reconstruction | Done for L1: Gaussian splat. | Teammate |
-| 3. Graph creation | **First version done:** `scripts/build_graph.py` → `data/L1/graph_L1.json`. Needs human review; stairs not modelled yet. | Us |
+| 3. Graph creation | **First version done:** `navigation/scripts/build_graph.py` → `navigation/data/L1/graph_L1.json`. Needs human review; stairs not modelled yet. | Us |
 | 4. Labeling | Started: VLM-verified L1 objects exist, but in the Metashape floorplan frame. | Teammate |
 | 5. Routing | Not started. | — |
 | 6. Showcase | Undecided: 3D sim / game / AR. | — |
 
 ## Data (team Google Drive; IDs are NOT in git)
 This repo is public, and the photo package asks not to be republished. So:
-- Drive folder and file IDs live only in the untracked `data/drive_ids.txt`.
-- `bash scripts/download_data.sh` downloads the files into `data/L1/` and builds the viewer splats.
+- Drive folder and file IDs live only in the untracked `navigation/data/drive_ids.txt`.
+- `bash navigation/scripts/download_data.sh` downloads the files into `navigation/data/L1/` and builds the viewer splats.
 
 | What | Drive path |
 |---|---|
@@ -59,7 +59,7 @@ z       = (e57_z - 6.27473) - 0.65
 - The floor is sparse in the splat (shiny/low-texture surfaces). There is a reflection layer about 0.5 m below the real floor.
 - The obstacle slice (0.3–1.8 m above the floor) shows walls clearly.
 
-## Graph builder: how it actually works (`.venv/bin/python scripts/build_graph.py`, ~1 min)
+## Graph builder: how it actually works (`.venv/bin/python navigation/scripts/build_graph.py`, ~1 min)
 The original plan below was adjusted as follows:
 1. **Floor height under each photo spot.** Floor = Cupix camera z − 1.38 m. The 1.38 m is the median of per-photo measurements from the splat (densest layer 0.7–2.1 m below the camera, in a ring 0.6–3 m out). The per-photo measurements are noisy (±0.5 m), so they aren't used individually.
    - Cupix heights show L1 is **split-level**: a lower part (camera z ≈ −1.1) and an upper part (≈ −0.3), about 0.8 m apart, plus the tiered auditorium.
@@ -127,21 +127,29 @@ Edges are undirected unless `"directed": true`. `id` is generated automatically;
           {"from":"elev_A_f1","to":"elev_A_f2","type":"elevator","cost_s":45}]}
 ```
 
+## Repo layout
+- `navigation/`: our graph pipeline and viewer (everything below).
+- `graffiti/`: the teammate's "Grimes Graffiti" app, for painting on the walls of the splat. Run it with `python3 graffiti/serve.py`.
+  - Works in the **BIM frame** (metres, Z up). `graffiti/data/scene.json` holds the splat→BIM transform and 96 training camera stations.
+  - BIM = R·(ply_xyz·31.7753) + (−14.795, 6.098, 6.895), i.e. the inverse of `dataparser_transforms.json`.
+  - Our fitted pano positions agree with its stations to 0.23 m median in xy; ours are 0.66 m too low in z.
+  - Its data (`splat.ply`, `mesh_pos.bin`/`mesh_idx.bin` = decimated Metashape mesh in BIM) is in the Drive zip `grimes_graffiti.zip`, not in git. Its README says the model is team-only.
+
 ## Project files
 GitHub repo: https://github.com/yoonoolee/fun-with-3d-buildings (public). Keep Drive IDs, photos, and `.ply` files out of it.
-- `data/L1/`:
+- `navigation/data/L1/`:
   - In git: `pano_reg.json` (our pano→splat transform), `graph_L1.json` (graph output).
-  - Site: https://yoonoolee.github.io/fun-with-3d-buildings/ (root `index.html` redirects to `viewer/`).
+  - Site: https://yoonoolee.github.io/fun-with-3d-buildings/ (root `index.html` redirects to `navigation/viewer/`).
   - Local only, gitignored:
     - from Drive: `splat_clean.ply`, `dataparser_transforms.json`, `L1_manifest.json`
   - Hosted publicly (committed for GitHub Pages; user decided 2026-11-10): `view_full.ply`, `view_noceiling.ply`. Regenerate them with `make_viewer_splats.py` and commit after changes.
-- `scripts/common.py`: PLY I/O, `load_splat_m()`, `panos_in_splat_m()`.
-- `scripts/build_graph.py`: the graph builder.
-- `scripts/make_viewer_splats.py`: makes the viewer splats.
-- `scripts/download_data.sh`: fetches the data from Drive.
-- `viewer/index.html`: shows the graph (3D tubes and balls) inside the splat.
+- `navigation/scripts/common.py`: PLY I/O, `load_splat_m()`, `panos_in_splat_m()`.
+- `navigation/scripts/build_graph.py`: the graph builder.
+- `navigation/scripts/make_viewer_splats.py`: makes the viewer splats.
+- `navigation/scripts/download_data.sh`: fetches the data from Drive.
+- `navigation/viewer/index.html`: shows the graph (3D tubes and balls) inside the splat.
   - Uses three.js + gaussian-splats-3d 0.4.7 from CDN.
-  - Run `python3 -m http.server 8765` from the repo root, then open `http://localhost:8765/viewer/` (`?mode=top`, or `?mode=walk&pano=N`).
+  - Run `python3 -m http.server 8765` from the repo root, then open `http://localhost:8765/navigation/viewer/` (`?mode=top`, or `?mode=walk&pano=N`).
   - Walk mode has its own first-person controls.
 - The Plotly 3D view and the PNG output were removed (2026-11-10). The viewer replaces them.
 

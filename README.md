@@ -1,19 +1,21 @@
 # Fun with 3D Buildings
 
-Indoor navigation graph for Grimes (Level 1), built from a Gaussian splat of 360° photos.
+Grimes (Level 1) from 360° photos → Gaussian splat.
 
-Viewer: https://yoonoolee.github.io/fun-with-3d-buildings/
+- `navigation/`: navigation graph + viewer. Live: https://yoonoolee.github.io/fun-with-3d-buildings/
+- `graffiti/`: draw on the walls of the 3D model.
 
 ## Setup
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-bash scripts/download_data.sh   # needs data/drive_ids.txt (ask a teammate)
+python3 -m venv .venv && .venv/bin/pip install -r navigation/requirements.txt
+bash navigation/scripts/download_data.sh   # needs navigation/data/drive_ids.txt (ask a teammate)
 ```
 
-## Use
+## Navigation
 ```bash
-.venv/bin/python scripts/build_graph.py   # -> data/L1/graph_L1.json
-python3 -m http.server 8765               # then open http://localhost:8765/viewer/
+.venv/bin/python navigation/scripts/build_graph.py   # -> navigation/data/L1/graph_L1.json
+python3 -m http.server 8765                          # then open http://localhost:8765/navigation/viewer/
 ```
 
-Technical notes are in `CLAUDE.md`.
+## Graffiti
+Put its `data/` files (from `grimes_graffiti.zip` on the Drive) in `graffiti/data/`, then run `python3 graffiti/serve.py`. See `graffiti/README.txt`.

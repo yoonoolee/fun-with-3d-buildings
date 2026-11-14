@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grimes Graffiti</title>
+<style>
+  :root { --bg:#111; --panel:rgba(20,20,24,.86); --fg:#eee; --muted:#9a9aa5; --accent:#ff4d6d; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+    font:14px/1.4 system-ui,-apple-system,"Segoe UI","Microsoft JhengHei",sans-serif; overflow:hidden; }
+  #stage { position:fixed; inset:0; }
+  #stage canvas { display:block; width:100%; height:100%; touch-action:none; }
+  #bar { position:fixed; top:10px; left:10px; right:10px; display:flex; flex-wrap:wrap; gap:8px; align-items:center;
+    background:var(--panel); padding:8px 10px; border-radius:10px; z-index:10; }
+  #bar label { display:flex; align-items:center; gap:5px; color:var(--muted); }
+  button,select,input[type=text] { background:#2a2a31; color:var(--fg); border:1px solid #3a3a44; border-radius:7px;
+    padding:5px 9px; font:inherit; }
+  button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+  input[type=color] { width:34px; height:28px; border:none; background:none; padding:0; }
+  input[type=text] { width:90px; }
+  #status { margin-left:auto; color:var(--muted); }
+  #help { position:fixed; left:10px; bottom:10px; background:var(--panel); padding:8px 10px; border-radius:10px;
+    color:var(--muted); font-size:12px; z-index:10; max-width:calc(100% - 40px); }
+  #cursor { position:fixed; width:10px; height:10px; margin:-6px 0 0 -6px; border:2px solid #fff; border-radius:50%;
+    pointer-events:none; display:none; z-index:5; mix-blend-mode:difference; }
+  #photo { position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); pointer-events:none; display:none;
+    z-index:4; opacity:.5; }
+  #loading { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; font-size:16px;
+    color:var(--muted); z-index:20; pointer-events:none; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<img id="photo" alt="">
+<div id="cursor"></div>
+<div id="loading">Loading model…</div>
+<div id="bar">
+  <button id="modeLook" class="on">Look</button>
+  <button id="modeDraw">Draw (G)</button>
+  <label>Color <input type="color" id="color" value="#ff4d6d"></label>
+  <label>Width <input type="range" id="width" min="1" max="20" value="4"> <span id="widthVal">4 cm</span></label>
+  <label>Name <input type="text" id="author" maxlength="40" placeholder="anonymous"></label>
+  <button id="undo">Undo my last stroke</button>
+  <button id="exportBtn" title="Save all strokes to a file you can send to others">Export</button>
+  <button id="importBtn" title="Add strokes from a file someone sent you">Import</button>
+  <input type="file" id="importFile" accept=".json,application/json" hidden>
+  <label>Station <select id="station"></select></label>
+  <label><input type="checkbox" id="showMesh"> Show mesh</label>
+  <button id="locBtn">Locate from photo</button>
+  <input type="file" id="locFile" accept="image/*" capture="environment" hidden>
+  <label id="photoCtl" hidden>Photo <input type="range" id="photoOpacity" min="0" max="100" value="50"> <button id="photoClose">✕</button></label>
+  <span id="status"></span>
+</div>
+<div id="help">Look: drag to turn · WASD move · Q/E down/up · wheel forward/back · Shift faster &nbsp;|&nbsp; Draw: left button paints on walls, right-drag turns</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+  "@mkkellogg/gaussian-splats-3d": "https://cdn.jsdelivr.net/npm/@mkkellogg/gaussian-splats-3d@0.4.7/build/gaussian-splats-3d.module.js",
+  "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.8.3/build/index.module.js"
+} }
+</script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
