@@ -32,7 +32,7 @@ Other Drive contents:
 
 **Facts about the data:**
 - The panos are 4096×2048 equirectangular images; the `mobile/` copies are 2048×1024.
-- Faces are blurred. Do not republish the photos.
+- Faces are blurred.
 - **Camera positions are already known** (Cupix, in metres). No structure-from-motion is needed.
 - Manifest `stations[i]` has these fields:
   - `position`: Y-up, stored as `[x, z, -y]`
@@ -135,13 +135,13 @@ Edges are undirected unless `"directed": true`. `id` is generated automatically;
   - Data in git: `splat.ply` and `mesh_pos.bin`/`mesh_idx.bin` (decimated Metashape mesh, in BIM).
 
 ## Project files
-GitHub repo: https://github.com/yoonoolee/fun-with-3d-buildings (public). Keep Drive IDs, photos, and `.ply` files out of it.
+GitHub repo: https://github.com/yoonoolee/fun-with-3d-buildings. Drive IDs, photos and `splat_clean.ply` stay out of git.
 - `navigation/data/L1/`:
   - In git: `pano_reg.json` (our pano→splat transform), `graph_L1.json` (graph output).
   - Site: https://yoonoolee.github.io/fun-with-3d-buildings/ (root `index.html` redirects to `navigation/viewer/`).
   - Local only, gitignored:
     - from Drive: `splat_clean.ply`, `dataparser_transforms.json`, `L1_manifest.json`
-  - Hosted publicly (committed for GitHub Pages; user decided 2026-11-10): `view_full.ply`, `view_noceiling.ply`. Regenerate them with `make_viewer_splats.py` and commit after changes.
+  - Committed (used by the hosted viewer): `view_full.ply`, `view_noceiling.ply`. Regenerate them with `make_viewer_splats.py` and commit after changes.
 - `navigation/scripts/common.py`: PLY I/O, `load_splat_m()`, `panos_in_splat_m()`.
 - `navigation/scripts/build_graph.py`: the graph builder.
 - `navigation/scripts/make_viewer_splats.py`: makes the viewer splats.
