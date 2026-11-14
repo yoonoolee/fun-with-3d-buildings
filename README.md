@@ -18,4 +18,4 @@ python3 -m http.server 8765                          # then open http://localhos
 ```
 
 ## Graffiti
-Put its `data/` files (from `grimes_graffiti.zip` on the Drive) in `graffiti/data/`, then run `python3 graffiti/serve.py`. See `graffiti/README.txt`.
+Run `python3 graffiti/serve.py`. See `graffiti/README.txt`.

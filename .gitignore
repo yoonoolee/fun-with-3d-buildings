@@ -11,3 +11,5 @@ navigation/data/L1/dataparser_transforms.json
 # hosted on GitHub Pages for the navigation viewer
 !navigation/data/L1/view_full.ply
 !navigation/data/L1/view_noceiling.ply
+!graffiti/data/*.ply
+!graffiti/data/*.bin

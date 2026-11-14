@@ -15,7 +15,6 @@ Work on **Level 1 (L1) only** until the whole pipeline works end to end.
 | 6. Showcase | Undecided: 3D sim / game / AR. | — |
 
 ## Data (team Google Drive; IDs are NOT in git)
-This repo is public, and the photo package asks not to be republished. So:
 - Drive folder and file IDs live only in the untracked `navigation/data/drive_ids.txt`.
 - `bash navigation/scripts/download_data.sh` downloads the files into `navigation/data/L1/` and builds the viewer splats.
 
@@ -133,7 +132,7 @@ Edges are undirected unless `"directed": true`. `id` is generated automatically;
   - Works in the **BIM frame** (metres, Z up). `graffiti/data/scene.json` holds the splat→BIM transform and 96 training camera stations.
   - BIM = R·(ply_xyz·31.7753) + (−14.795, 6.098, 6.895), i.e. the inverse of `dataparser_transforms.json`.
   - Our fitted pano positions agree with its stations to 0.23 m median in xy; ours are 0.66 m too low in z.
-  - Its data (`splat.ply`, `mesh_pos.bin`/`mesh_idx.bin` = decimated Metashape mesh in BIM) is in the Drive zip `grimes_graffiti.zip`, not in git. Its README says the model is team-only.
+  - Data in git: `splat.ply` and `mesh_pos.bin`/`mesh_idx.bin` (decimated Metashape mesh, in BIM).
 
 ## Project files
 GitHub repo: https://github.com/yoonoolee/fun-with-3d-buildings (public). Keep Drive IDs, photos, and `.ply` files out of it.
