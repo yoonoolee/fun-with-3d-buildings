@@ -3,7 +3,7 @@
 Grimes (Level 1) from 360° photos → Gaussian splat.
 
 - `navigation/`: navigation graph + viewer. Live: https://yoonoolee.github.io/fun-with-3d-buildings/
-- `graffiti/`: draw on the walls of the 3D model.
+- `graffiti/`: draw on the walls of the 3D model, live with others. Live: https://yoonoolee.github.io/fun-with-3d-buildings/graffiti/
 
 ## Setup
 ```bash

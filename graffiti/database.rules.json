@@ -1,0 +1,24 @@
+{
+  "rules": {
+    "strokes": {
+      ".read": true,
+      "$id": {
+        ".write": "auth != null && ((!data.exists() && newData.child('owner').val() === auth.uid) || (data.exists() && !newData.exists() && data.child('owner').val() === auth.uid))",
+        ".validate": "newData.hasChildren(['owner', 'color', 'width', 'points', 't'])",
+        "owner": { ".validate": "newData.isString()" },
+        "author": { ".validate": "newData.isString() && newData.val().length <= 40" },
+        "color": { ".validate": "newData.isString() && newData.val().matches(/^#[0-9a-fA-F]{6}$/)" },
+        "width": { ".validate": "newData.isNumber() && newData.val() >= 0.005 && newData.val() <= 0.3" },
+        "points": { ".validate": "newData.hasChildren()" },
+        "t": { ".validate": "newData.val() === now" },
+        "$other": { ".validate": false }
+      }
+    },
+    "players": {
+      ".read": true,
+      "$pid": {
+        ".write": "auth != null && $pid.beginsWith(auth.uid + '_')"
+      }
+    }
+  }
+}

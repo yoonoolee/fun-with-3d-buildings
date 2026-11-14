@@ -4,6 +4,8 @@
 import * as THREE from 'three';
 import * as GS from '@mkkellogg/gaussian-splats-3d';
 import { computeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
+import { firebaseConfig } from './firebase-config.js';
+import { connectLive } from './live.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
@@ -64,16 +66,33 @@ const browserBackend = {
     return true;
   },
 };
+// 'live': Firebase (firebase-config.js), shared in real time by everyone on the website; ?emulator uses a local
+//         Firebase emulator for testing
 let backend = browserBackend;
-try {
-  const r = await api('api/strokes');
-  if (r.ok && (r.headers.get('content-type') || '').includes('json')) backend = serverBackend;
-} catch { /* no server: offline package */ }
+let live = null;
+const emulator = new URLSearchParams(location.search).has('emulator');
+const liveConfig = emulator
+  ? { apiKey: 'demo-key', projectId: 'demo-graffiti', databaseURL: 'https://demo-graffiti-default-rtdb.firebaseio.com' }
+  : firebaseConfig;
+if (liveConfig) {
+  try {
+    live = await connectLive(liveConfig, { emulator });
+    backend = live.backend;
+  } catch (e) {
+    console.error(e);
+    setStatus('! Multiplayer unavailable: drawings stay in this browser');
+  }
+} else {
+  try {
+    const r = await api('api/strokes');
+    if (r.ok && (r.headers.get('content-type') || '').includes('json')) backend = serverBackend;
+  } catch { /* no server: offline package */ }
+}
 
 // ---- renderer / camera
 const stage = $('stage');
 const renderer = new THREE.WebGLRenderer({ antialias: false });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+renderer.setPixelRatio(1); // splat rendering is fill-rate bound: 1.5x on Retina drops to ~40 fps, 1x holds 60
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setClearColor(0x111111, 1);
 stage.appendChild(renderer.domElement);
@@ -117,6 +136,19 @@ sel.addEventListener('change', () => store.set('graffitiStation', sel.value));
 const overlay = new THREE.Scene();
 let occ = null;
 let meshViz = null;
+let meshReady = false; // strokes are laid onto the mesh, so they are built once it has loaded
+let triAdj = null; // vertex -> triangles touching it, to spread paint only across connected surface
+function buildAdjacency(geom) {
+  const idx = geom.index.array;
+  const nv = geom.attributes.position.count;
+  const start = new Uint32Array(nv + 1);
+  for (let i = 0; i < idx.length; i++) start[idx[i] + 1]++;
+  for (let v = 0; v < nv; v++) start[v + 1] += start[v];
+  const fill = start.slice(0, nv);
+  const tris = new Uint32Array(idx.length);
+  for (let i = 0; i < idx.length; i++) tris[fill[idx[i]]++] = (i / 3) | 0;
+  triAdj = { start, tris, seen: new Uint32Array(idx.length / 3), stamp: 0 };
+}
 (async () => {
   const [pos, idx] = await Promise.all(['data/mesh_pos.bin', 'data/mesh_idx.bin']
     .map((u) => fetch(u).then((r) => r.arrayBuffer())));
@@ -125,6 +157,7 @@ let meshViz = null;
   geom.setIndex(new THREE.BufferAttribute(new Uint32Array(idx), 1));
   geom.computeVertexNormals();
   geom.computeBoundsTree();
+  buildAdjacency(geom);
   occ = new THREE.Mesh(geom, new THREE.MeshBasicMaterial({
     colorWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2,
   }));
@@ -134,6 +167,8 @@ let meshViz = null;
   meshViz.raycast = () => {};
   meshViz.visible = $('showMesh').checked;
   overlay.add(meshViz);
+  meshReady = true;
+  for (const e of strokes.values()) if (!e.obj) buildStroke(e);
 })();
 $('showMesh').addEventListener('change', () => { if (meshViz) meshViz.visible = $('showMesh').checked; });
 
@@ -152,34 +187,25 @@ viewer.addSplatScene(scene.splat_url || 'data/splat.ply', {
 // ---- strokes
 const strokes = new Map(); // id -> {obj, data}
 let myIds = [];
-function strokeObject(s) {
-  const pts = s.points.map((p) => new THREE.Vector3(...p));
-  const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(s.color) });
-  const g = new THREE.Group();
-  const r = s.width / 2;
-  if (pts.length > 1) {
-    const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
-    g.add(new THREE.Mesh(new THREE.TubeGeometry(curve, Math.min(pts.length * 3, 1500), r, 8, false), mat));
+function buildStroke(e, P) {
+  const s = e.data;
+  try {
+    e.obj = newPaint();
+    paintFrom(e.obj, P || surfacePoints(s.points), s.width, s.color, 0);
+  } catch (err) {
+    console.error('bad stroke', s.id, err);
   }
-  for (const p of pts.length > 1 ? [pts[0], pts[pts.length - 1]] : pts) {
-    const cap = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 8), mat);
-    cap.position.copy(p);
-    g.add(cap);
-  }
-  g.traverse((o) => { o.raycast = () => {}; });
-  return g;
 }
-function addStroke(s) {
+function addStroke(s, P) {
   if (strokes.has(s.id)) return;
-  const obj = strokeObject(s);
-  overlay.add(obj);
-  strokes.set(s.id, { obj, data: s });
+  const e = { obj: null, data: s };
+  strokes.set(s.id, e);
+  if (meshReady) buildStroke(e, P);
 }
 function removeStroke(id) {
-  const s = strokes.get(id);
-  if (!s) return;
-  overlay.remove(s.obj);
-  s.obj.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+  const e = strokes.get(id);
+  if (!e) return;
+  if (e.obj) dropPaint(e.obj);
   strokes.delete(id);
 }
 async function sync() {
@@ -194,14 +220,94 @@ async function sync() {
     setStatus('! Cannot reach the server');
   }
 }
-sync();
-if (backend === serverBackend) setInterval(sync, 3000);
+if (live) {
+  live.onStrokes(
+    (s) => {
+      addStroke(s);
+      if (s.mine && !myIds.includes(s.id)) myIds.push(s.id);
+      if (!statusMsg.startsWith('!')) setStatus(`${strokes.size} strokes`);
+    },
+    (id) => {
+      removeStroke(id);
+      myIds = myIds.filter((x) => x !== id);
+      if (!statusMsg.startsWith('!')) setStatus(`${strokes.size} strokes`);
+    },
+  );
+} else {
+  sync();
+  if (backend === serverBackend) setInterval(sync, 3000);
+}
 
-$('undo').addEventListener('click', async () => {
-  const id = myIds[myIds.length - 1];
-  if (id === undefined) { setStatus('Nothing to undo'); return; }
-  if (await backend.remove(id)) { removeStroke(id); myIds.pop(); setStatus(`${strokes.size} strokes`); }
-});
+// ---- other players (multiplayer): their stroke shows live while they draw it
+const players = new Map(); // player id -> {paint}
+function upsertPlayer(pid, v) {
+  removePlayer(pid);
+  const d = v.drawing;
+  if (!meshReady || !d || !Array.isArray(d.points) || !d.points.length || !/^#[0-9a-fA-F]{6}$/.test(v.color)) return;
+  const w = THREE.MathUtils.clamp(Number(d.width) || 0.04, 0.005, 0.3);
+  const paint = newPaint();
+  paintFrom(paint, surfacePoints(d.points), w, v.color, 0);
+  players.set(pid, { paint });
+}
+function removePlayer(pid) {
+  const p = players.get(pid);
+  if (!p) return;
+  dropPaint(p.paint);
+  players.delete(pid);
+}
+if (live) live.onPlayers(upsertPlayer, removePlayer);
+
+// send my stroke while I draw it, about 10 times a second, only when it changed
+let lastSent = 0;
+let lastSig = '';
+function sendMe(now) {
+  if (!live || now - lastSent < 100) return;
+  const drawing = cur ? { width: cur.width, points: storedPoints(cur.P.slice(-400), cur.N.slice(-400)) } : null;
+  const sig = JSON.stringify([$('color').value, drawing ? drawing.points.length : -1]);
+  if (sig === lastSig) return;
+  lastSig = sig;
+  lastSent = now;
+  live.setMe({ color: $('color').value, drawing });
+}
+
+const dragOf = new Map(); // stroke id -> drag number: a drag that jumps between surfaces makes several strokes
+let undoing = false;
+async function undo() {
+  if (undoing) return;
+  const last = myIds[myIds.length - 1];
+  if (last === undefined) { setStatus('Nothing to undo'); return; }
+  const g = dragOf.get(last);
+  const ids = g === undefined ? [last] : myIds.filter((id) => dragOf.get(id) === g);
+  undoing = true;
+  let failed = 0;
+  for (const id of ids) {
+    if (await backend.remove(id)) {
+      removeStroke(id);
+      myIds = myIds.filter((x) => x !== id); // (the live listener may already have done this)
+    } else failed++;
+  }
+  undoing = false;
+  setStatus(failed ? '! Undo failed' : `${strokes.size} strokes`);
+}
+$('undo').addEventListener('click', undo);
+
+async function clearMine() {
+  if (undoing) return;
+  const ids = [...myIds];
+  if (!ids.length) { setStatus('You have no strokes to clear'); return; }
+  if (!confirm(`Delete all ${ids.length} of your strokes? This can't be undone.`)) return;
+  undoing = true;
+  const ok = await Promise.all(ids.map(async (id) => {
+    if (!(await backend.remove(id))) return false;
+    removeStroke(id);
+    myIds = myIds.filter((x) => x !== id);
+    return true;
+  }));
+  undoing = false;
+  const failed = ok.filter((x) => !x).length;
+  setStatus(failed ? `! ${failed} strokes could not be deleted` : `${strokes.size} strokes`);
+}
+$('clearMine').addEventListener('click', clearMine);
 
 // ---- export / import drawings as a JSON file (to swap drawings between people)
 $('exportBtn').addEventListener('click', () => {
@@ -234,7 +340,7 @@ $('importFile').addEventListener('change', async () => {
       have.add(JSON.stringify(s.points));
       added++;
     }
-    await sync();
+    if (!live) await sync();
     setStatus(`! Imported ${added} strokes`);
   } catch (e) {
     setStatus('! Not a graffiti file');
@@ -256,69 +362,242 @@ $('modeDraw').addEventListener('click', () => setMode('draw'));
 setMode('look');
 $('width').addEventListener('input', () => { $('widthVal').textContent = `${$('width').value} cm`; });
 
-// ---- picking
+// ---- picking and the surface under a stroke
 const raycaster = new THREE.Raycaster();
 raycaster.firstHitOnly = true;
 const ndc = new THREE.Vector2();
-const MAX_DRAW_M = 12;
-function pick(e) {
-  if (!occ) return null;
+const MAX_DRAW_M = 60;
+const STORE_LIFT = 0.003; // stored points sit 3 mm in front of the surface, which records which side was painted
+const brushWidth = () => $('width').value / 100;
+const normalRadius = (w) => Math.max(0.04, w * 0.6); // average the bumpy mesh over about the brush size
+const _c = new THREE.Vector3();
+const _n = new THREE.Vector3();
+// area-weighted mean normal of the mesh triangles within R of center, each flipped to agree with ref
+function surfaceNormal(center, ref, R) {
+  const sum = new THREE.Vector3();
+  occ.geometry.boundsTree.shapecast({
+    intersectsBounds: (box) => box.distanceToPoint(center) <= R,
+    intersectsTriangle: (tri) => {
+      tri.closestPointToPoint(center, _c);
+      if (_c.distanceToSquared(center) > R * R) return false;
+      tri.getNormal(_n);
+      const a = tri.getArea();
+      sum.addScaledVector(_n, _n.dot(ref) < 0 ? -a : a);
+      return false;
+    },
+  });
+  return sum.lengthSq() > 1e-12 ? sum.normalize() : ref.clone().normalize();
+}
+function pickAt(x, y) {
+  if (!meshReady) return null;
   const r = canvas.getBoundingClientRect();
-  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ndc.set(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1);
   raycaster.setFromCamera(ndc, camera);
   const h = raycaster.intersectObject(occ, false)[0];
   if (!h || h.distance > MAX_DRAW_M) return null;
-  const n = h.face.normal.clone();
-  if (n.dot(raycaster.ray.direction) > 0) n.negate();
-  return h.point.clone().addScaledVector(n, 0.012); // sit just in front of the surface
+  const ref = h.face.normal.clone();
+  if (ref.dot(raycaster.ray.direction) > 0) ref.negate(); // towards the camera
+  return { point: h.point.clone(), face: h.faceIndex, dist: h.distance, normal: surfaceNormal(h.point, ref, normalRadius(brushWidth())) };
+}
+// stored stroke points -> the nearest points on the mesh and their triangles (any stroke, old or new, anyone's)
+function surfacePoints(points) {
+  const bvh = occ.geometry.boundsTree;
+  const P = [];
+  const F = [];
+  for (const q of points) {
+    const p = new THREE.Vector3(...q);
+    const hit = bvh.closestPointToPoint(p, { point: new THREE.Vector3() }, 0, 0.2);
+    P.push(hit ? hit.point.clone() : p);
+    F.push(hit ? hit.faceIndex : -1);
+  }
+  return { P, F };
+}
+const storedPoints = (P, N) => P.map((p, i) => [p.x + N[i].x * STORE_LIFT, p.y + N[i].y * STORE_LIFT, p.z + N[i].z * STORE_LIFT]);
+
+// ---- paint: copies of the mesh triangles near a stroke, coloured wherever they are within the brush radius of
+// the stroke's centre line. The paint lies exactly on the surface, so it wraps around corners and bumps.
+const CHUNK = 32; // centre-line points per paint piece (the shader checks the distance to each segment)
+const paintVS = 'varying vec3 vW;\nvoid main() { vW = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }';
+const paintFS = `uniform vec3 uPts[${CHUNK + 1}];
+uniform int uCount;
+uniform float uR;
+uniform vec3 uColor;
+uniform float uRing;
+varying vec3 vW;
+void main() {
+  float d = distance(vW, uPts[0]);
+  for (int i = 0; i < ${CHUNK}; i++) {
+    if (i + 1 >= uCount) break;
+    vec3 a = uPts[i];
+    vec3 ab = uPts[i + 1] - a;
+    float t = clamp(dot(vW - a, ab) / max(dot(ab, ab), 1e-12), 0.0, 1.0);
+    d = min(d, distance(vW, a + t * ab));
+  }
+  if (d > uR) discard;
+  vec3 c = uColor;
+  if (uRing > 0.5 && d > uR - max(1.5 * fwidth(d), 0.06 * uR)) c = vec3(1.0); // brush outline
+  gl_FragColor = vec4(c, 1.0);
+  #include <colorspace_fragment>
+}`;
+const _tc = new THREE.Vector3();
+const _tri = new THREE.Triangle();
+let paintSeq = 0; // later strokes draw over earlier ones
+// mesh triangles within the brush radius of the centre line, reached by walking across connected triangles from
+// the ones under the centre line, so paint never jumps onto a separate surface that happens to be close
+function nearbyTriangles(pts, faces, r) {
+  let gap = 0;
+  for (let i = 1; i < pts.length; i++) gap = Math.max(gap, pts[i].distanceTo(pts[i - 1]));
+  const reach2 = (r + gap / 2) ** 2;
+  const pos = occ.geometry.attributes.position.array;
+  const idx = occ.geometry.index.array;
+  const A = triAdj;
+  const stamp = ++A.stamp;
+  const queue = [];
+  for (const f of faces) if (f >= 0 && A.seen[f] !== stamp) { A.seen[f] = stamp; queue.push(f); }
+  const out = [];
+  while (queue.length) {
+    const f = queue.pop();
+    _tri.a.fromArray(pos, idx[3 * f] * 3);
+    _tri.b.fromArray(pos, idx[3 * f + 1] * 3);
+    _tri.c.fromArray(pos, idx[3 * f + 2] * 3);
+    let near = false;
+    for (const p of pts) {
+      _tri.closestPointToPoint(p, _tc);
+      if (_tc.distanceToSquared(p) <= reach2) { near = true; break; }
+    }
+    if (!near) continue;
+    out.push(_tri.a.x, _tri.a.y, _tri.a.z, _tri.b.x, _tri.b.y, _tri.b.z, _tri.c.x, _tri.c.y, _tri.c.z);
+    for (let k = 0; k < 3; k++) {
+      const v = idx[3 * f + k];
+      for (let j = A.start[v]; j < A.start[v + 1]; j++) {
+        const g = A.tris[j];
+        if (A.seen[g] !== stamp) { A.seen[g] = stamp; queue.push(g); }
+      }
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(out, 3));
+  g.computeBoundingSphere();
+  return g;
+}
+function paintPiece(pts, faces, r, color, ring = false) {
+  const u = Array.from({ length: CHUNK + 1 }, (_, i) => pts[Math.min(i, pts.length - 1)].clone());
+  const mat = new THREE.ShaderMaterial({
+    uniforms: {
+      uPts: { value: u }, uCount: { value: pts.length }, uR: { value: r },
+      uColor: { value: new THREE.Color(color) }, uRing: { value: ring ? 1 : 0 },
+    },
+    vertexShader: paintVS, fragmentShader: paintFS, side: THREE.DoubleSide, depthWrite: false,
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4, // in front of the invisible mesh it copies
+  });
+  const m = new THREE.Mesh(nearbyTriangles(pts, faces, r), mat);
+  m.raycast = () => {};
+  return m;
+}
+function newPaint() {
+  const group = new THREE.Group();
+  group.renderOrder = ++paintSeq;
+  overlay.add(group);
+  return { group, pieces: [] };
+}
+// (re)build the pieces of a centre line {P, F} from piece `from` on; returns the number of pieces
+function paintFrom(paint, { P, F }, w, color, from) {
+  const n = Math.max(1, Math.ceil((P.length - 1) / CHUNK));
+  for (let k = from; k < n; k++) {
+    const old = paint.pieces[k];
+    if (old) { paint.group.remove(old); old.geometry.dispose(); old.material.dispose(); }
+    const end = Math.min(P.length, (k + 1) * CHUNK + 1);
+    const m = paintPiece(P.slice(k * CHUNK, end), F.slice(k * CHUNK, end), w / 2, color);
+    m.renderOrder = paint.group.renderOrder;
+    paint.pieces[k] = m;
+    paint.group.add(m);
+  }
+  return n;
+}
+function dropPaint(paint) {
+  overlay.remove(paint.group);
+  for (const m of paint.pieces) { m.geometry.dispose(); m.material.dispose(); }
 }
 
-// ---- drawing
-const MAX_PTS = 4000;
-let cur = null; // {pts, line}
-function startStroke(p) {
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAX_PTS * 3), 3));
-  geo.setDrawRange(0, 0);
-  const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: $('color').value }));
-  line.frustumCulled = false;
-  overlay.add(line);
-  cur = { pts: [], line };
-  addPoint(p);
-}
-function addPoint(p) {
-  const w = $('width').value / 100;
-  const last = cur.pts[cur.pts.length - 1];
-  if (last) {
-    const d = p.distanceTo(last);
-    if (d < Math.max(0.008, w * 0.25)) return;
-    if (d > 0.5) { finishStroke(); startStroke(p); return; } // jumped to another surface: new stroke
+// ---- brush cursor: a dab of the paint itself (same colour and size), lying on the surface under the mouse
+let mouse = null; // last pointer position over the canvas
+let brushMesh = null;
+let brushKey = '';
+function updateBrush() {
+  const h = mode === 'draw' && mouse && !look ? pickAt(mouse.x, mouse.y) : null;
+  $('cursor').style.display = mode === 'draw' && !h ? 'block' : 'none';
+  if (!h) { if (brushMesh) brushMesh.visible = false; return; }
+  const w = brushWidth();
+  const color = $('color').value;
+  const key = `${h.point.x.toFixed(4)},${h.point.y.toFixed(4)},${h.point.z.toFixed(4)},${w},${color}`;
+  if (key !== brushKey) {
+    brushKey = key;
+    if (brushMesh) { overlay.remove(brushMesh); brushMesh.geometry.dispose(); brushMesh.material.dispose(); }
+    brushMesh = paintPiece([h.point], [h.face], w / 2, color, true);
+    brushMesh.renderOrder = 1e9; // on top of all paint
+    overlay.add(brushMesh);
   }
-  if (cur.pts.length >= MAX_PTS) return;
-  cur.line.geometry.attributes.position.setXYZ(cur.pts.length, p.x, p.y, p.z);
-  cur.pts.push(p);
-  cur.line.geometry.attributes.position.needsUpdate = true;
-  cur.line.geometry.setDrawRange(0, cur.pts.length);
+  brushMesh.visible = true;
+}
+
+// ---- drawing: the path between pointer events is re-sampled every few pixels on screen and each sample is
+// ray cast, so the stroke follows the real surface (around corners) instead of cutting straight across
+const MAX_PTS = 4000;
+const SAMPLE_PX = 3;
+const JUMP_M = 0.3; // gap between neighbouring samples that means the path jumped to another surface (grows with distance)
+let cur = null; // {P, F, N, D, width, color, drag, paint, done, dirty}
+let dragNo = 0;
+let lastXY = null;
+function startStroke(h, drag) {
+  cur = { P: [], F: [], N: [], D: [], width: brushWidth(), color: $('color').value, drag, paint: null, done: 0, dirty: false };
+  addPoint(h);
+}
+function addPoint(h) {
+  const last = cur.P[cur.P.length - 1];
+  if (last) {
+    const d = h.point.distanceTo(last);
+    if (d < Math.max(0.004, cur.width * 0.12)) return;
+    const jump = Math.max(JUMP_M, 0.15 * Math.min(h.dist, cur.D[cur.D.length - 1])); // seen from far, samples spread out
+    if (d > jump) { const drag = cur.drag; finishStroke(); startStroke(h, drag); return; }
+  }
+  if (cur.P.length >= MAX_PTS) return;
+  cur.P.push(h.point);
+  cur.F.push(h.face);
+  cur.N.push(h.normal);
+  cur.D.push(h.dist);
+  cur.dirty = true;
+}
+function drawTo(x, y) {
+  const [x0, y0] = lastXY;
+  const steps = Math.max(1, Math.ceil(Math.hypot(x - x0, y - y0) / SAMPLE_PX));
+  for (let i = 1; i <= steps; i++) {
+    const h = pickAt(x0 + ((x - x0) * i) / steps, y0 + ((y - y0) * i) / steps);
+    if (h && cur) addPoint(h);
+  }
+  lastXY = [x, y];
+}
+function updatePreview() {
+  if (!cur || !cur.dirty) return;
+  cur.dirty = false;
+  if (!cur.paint) cur.paint = newPaint();
+  cur.done = paintFrom(cur.paint, cur, cur.width, cur.color, cur.done) - 1; // only the last piece still grows
 }
 async function finishStroke() {
   if (!cur) return;
-  const { pts, line } = cur;
+  const c = cur;
   cur = null;
-  const s = {
-    author: $('author').value.trim(), color: $('color').value, width: $('width').value / 100,
-    points: pts.map((p) => [p.x, p.y, p.z]),
-  };
+  const s = { author: $('author').value.trim(), color: c.color, width: c.width, points: storedPoints(c.P, c.N) };
   try {
     const id = await backend.add(s);
-    addStroke({ ...s, id, mine: true });
-    myIds.push(id);
+    dragOf.set(id, c.drag);
+    addStroke({ ...s, id, mine: true }, { P: c.P, F: c.F });
+    if (!myIds.includes(id)) myIds.push(id);
     setStatus(`${strokes.size} strokes`);
   } catch (e) {
     setStatus('! Saving failed');
     console.error(e);
   } finally {
-    overlay.remove(line);
-    line.geometry.dispose();
+    if (c.paint) dropPaint(c.paint);
   }
 }
 
@@ -328,8 +607,9 @@ canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('pointerdown', (e) => {
   canvas.setPointerCapture(e.pointerId);
   if (mode === 'draw' && e.button === 0) {
-    const p = pick(e);
-    if (p) startStroke(p);
+    const h = pickAt(e.clientX, e.clientY);
+    lastXY = [e.clientX, e.clientY];
+    if (h) startStroke(h, ++dragNo);
   } else {
     look = { x: e.clientX, y: e.clientY };
     canvas.style.cursor = mode === 'draw' ? 'none' : 'grabbing';
@@ -339,17 +619,20 @@ canvas.addEventListener('pointermove', (e) => {
   const c = $('cursor');
   c.style.left = `${e.clientX}px`;
   c.style.top = `${e.clientY}px`;
+  mouse = { x: e.clientX, y: e.clientY };
   if (look) {
-    cam.yaw -= (e.clientX - look.x) * 0.004;
-    cam.pitch = THREE.MathUtils.clamp(cam.pitch - (e.clientY - look.y) * 0.004, -1.45, 1.45);
+    cam.yaw += (e.clientX - look.x) * 0.004;
+    cam.pitch = THREE.MathUtils.clamp(cam.pitch + (e.clientY - look.y) * 0.004, -1.45, 1.45);
     look = { x: e.clientX, y: e.clientY };
-  } else if (cur) {
-    const p = pick(e);
-    if (p) addPoint(p);
+  } else if (cur && lastXY) {
+    const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : []; // all mouse samples since the last event
+    for (const ev of evs.length ? evs : [e]) drawTo(ev.clientX, ev.clientY);
   }
 });
+canvas.addEventListener('pointerleave', () => { mouse = null; });
 const endPointer = () => {
   if (cur) finishStroke();
+  lastXY = null;
   look = null;
   canvas.style.cursor = mode === 'draw' ? 'none' : 'grab';
 };
@@ -362,16 +645,28 @@ canvas.addEventListener('wheel', (e) => {
 }, { passive: false });
 
 const keys = new Set();
+const FWD = ['ArrowUp', 'KeyW'];
+let lastFwdTap = 0;
+let sprint = false;
 window.addEventListener('keydown', (e) => {
   if (e.target instanceof HTMLInputElement && e.target.type === 'text') return;
   if (e.code === 'KeyG') { setMode(mode === 'draw' ? 'look' : 'draw'); return; }
+  if (e.code === 'KeyZ' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); undo(); return; }
+  if (FWD.includes(e.code) && !e.repeat) { // double-tap forward = run while held
+    const now = performance.now();
+    sprint = now - lastFwdTap < 300;
+    lastFwdTap = now;
+  }
   keys.add(e.code);
 });
-window.addEventListener('keyup', (e) => keys.delete(e.code));
-window.addEventListener('blur', () => keys.clear());
+window.addEventListener('keyup', (e) => {
+  keys.delete(e.code);
+  if (!FWD.some((k) => keys.has(k))) sprint = false;
+});
+window.addEventListener('blur', () => { keys.clear(); sprint = false; });
 
 function move(dt) {
-  const v = (keys.has('ShiftLeft') || keys.has('ShiftRight') ? 4.5 : 1.5) * dt;
+  const v = (sprint || keys.has('ShiftLeft') || keys.has('ShiftRight') ? 4.5 : 1.5) * dt;
   const f = new THREE.Vector3(Math.cos(cam.yaw), Math.sin(cam.yaw), 0);
   const r = new THREE.Vector3(Math.sin(cam.yaw), -Math.cos(cam.yaw), 0);
   if (keys.has('KeyW') || keys.has('ArrowUp')) cam.pos.addScaledVector(f, v);
@@ -447,7 +742,13 @@ const clock = new THREE.Clock();
 renderer.autoClear = false;
 function frame() {
   requestAnimationFrame(frame);
-  move(Math.min(clock.getDelta(), 0.1));
+  const dt = Math.min(clock.getDelta(), 0.1);
+  move(dt);
+  updatePreview();
+  updateBrush();
+  sendMe(performance.now());
+  const online = !live ? '' : live.isConnected() ? `● ${players.size + 1} online` : 'reconnecting…';
+  if ($('online').textContent !== online) $('online').textContent = online;
   if (photoPose && (look || keys.size)) {  // user moved: hide the photo, back to free camera
     leavePhoto();
     photoEl.style.display = 'none';
