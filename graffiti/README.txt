@@ -11,11 +11,15 @@ Run
   A browser tab opens (Chrome or Edge recommended). Keep the black window open while you play.
   Needs Python 3 (python.org) and an internet connection (the page loads three.js from a CDN).
 
+Rooms
+  Pick a room in the top bar (or add ?room=gateway to the address). Each room has its own model, stations and
+  drawings. Grimes: data/ (multiplayer). Gateway lecture room: data/gateway/ (drawings stay in this browser for now).
+
 Controls
   Look : drag to turn, WASD to move, Q/E down/up, mouse wheel forward/back, Shift or double-tap Up/W = faster
   Draw : press G or the Draw button, then paint on the walls with the left button; right-drag turns
   Undo : Undo button or Cmd/Ctrl+Z (removes your whole last drag); Clear my strokes removes all of yours
-  Station list: jump to one of the 96 photo positions
+  Station list: jump to one of the photo positions
 
 Your drawings
   Multiplayer (when firebase-config.js is filled in): everyone's strokes appear live for everyone, and

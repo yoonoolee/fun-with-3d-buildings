@@ -18,6 +18,35 @@ const store = {
 let statusMsg = '';
 const setStatus = (t) => { statusMsg = t; };
 
+// ---- room: which building to show (?room=gateway); each room has its own model, stations and drawings
+const ROOMS = {
+  grimes: { name: 'Grimes', data: 'data/' },
+  gateway: { name: 'Gateway lecture room', data: 'data/gateway/' },
+};
+const params = new URLSearchParams(location.search);
+const roomId = ROOMS[params.get('room')] ? params.get('room') : 'grimes';
+const room = ROOMS[roomId];
+// browser storage keys: Grimes keeps its original names; other rooms use the teammate's "<room>:" prefix, so
+// drawings made with the standalone gateway_graffiti package (same address) show up here too
+const roomKey = (k) => (roomId === 'grimes' ? k : `${roomId}:${k}`);
+document.title = `${room.name} Graffiti`;
+// list only rooms whose data is here (the Gateway model is team-only, so the public site has just Grimes)
+const roomsHere = await Promise.all(Object.entries(ROOMS).map(async ([id, r]) => [id, r,
+  id === roomId || (await fetch(`${r.data}scene.json`, { method: 'HEAD' }).catch(() => null))?.ok]));
+for (const [id, r, ok] of roomsHere) if (ok) $('room').add(new Option(r.name, id));
+$('room').parentElement.hidden = $('room').options.length < 2;
+$('room').value = roomId;
+$('room').addEventListener('change', () => {
+  params.set('room', $('room').value);
+  location.search = params.toString(); // reload with the other room
+});
+const sceneRes = await fetch(`${room.data}scene.json`);
+if (!sceneRes.ok) {
+  $('loading').textContent = `The ${room.name} model isn't built yet (${room.data}scene.json is missing). Pick another room.`;
+  throw new Error(`missing ${room.data}scene.json`);
+}
+const scene = await sceneRes.json();
+
 // ---- identity (only the browser that drew a stroke can delete it)
 let owner = store.get('graffitiOwner');
 if (!owner) {
@@ -47,7 +76,7 @@ const serverBackend = {
   },
   async remove(id) { return (await api(`api/strokes/${id}`, { method: 'DELETE' })).ok; },
 };
-const LS_STROKES = 'graffitiStrokes';
+const LS_STROKES = roomKey('graffitiStrokes');
 let memStrokes = [];
 try { memStrokes = JSON.parse(store.get(LS_STROKES) || '[]'); } catch { memStrokes = []; }
 const persist = () => store.set(LS_STROKES, JSON.stringify(memStrokes));
@@ -67,11 +96,11 @@ const browserBackend = {
   },
 };
 // 'live': Firebase (firebase-config.js), shared in real time by everyone on the website; ?emulator uses a local
-//         Firebase emulator for testing
+//         Firebase emulator for testing. A room whose scene.json says "live": false stays in this browser.
 let backend = browserBackend;
 let live = null;
-const emulator = new URLSearchParams(location.search).has('emulator');
-const liveConfig = emulator
+const emulator = params.has('emulator');
+const liveConfig = scene.live === false ? null : emulator
   ? { apiKey: 'demo-key', projectId: 'demo-graffiti', databaseURL: 'https://demo-graffiti-default-rtdb.firebaseio.com' }
   : firebaseConfig;
 if (liveConfig) {
@@ -87,6 +116,7 @@ if (liveConfig) {
     const r = await api('api/strokes');
     if (r.ok && (r.headers.get('content-type') || '').includes('json')) backend = serverBackend;
   } catch { /* no server: offline package */ }
+  if (scene.live === false && backend === browserBackend) setStatus('! Multiplayer is off in this room: drawings are saved in this browser');
 }
 
 // ---- renderer / camera
@@ -116,8 +146,6 @@ function applyCamera() {
   camera.lookAt(cam.pos.clone().add(forward3()));
 }
 
-const scene = await (await fetch('data/scene.json')).json();
-
 // ---- stations (start points)
 const sel = $('station');
 for (const s of scene.stations) sel.add(new Option(s.id, s.id));
@@ -129,8 +157,8 @@ function goStation(id) {
   sel.value = s.id;
 }
 sel.addEventListener('change', () => { goStation(sel.value); sel.blur(); });
-goStation(store.get('graffitiStation') || scene.stations[0].id);
-sel.addEventListener('change', () => store.set('graffitiStation', sel.value));
+goStation(store.get(roomKey('graffitiStation')) || scene.start_station || scene.stations[0].id);
+sel.addEventListener('change', () => store.set(roomKey('graffitiStation'), sel.value));
 
 // ---- overlay scene: invisible mesh (depth + picking), strokes
 const overlay = new THREE.Scene();
@@ -150,7 +178,7 @@ function buildAdjacency(geom) {
   triAdj = { start, tris, seen: new Uint32Array(idx.length / 3), stamp: 0 };
 }
 (async () => {
-  const [pos, idx] = await Promise.all(['data/mesh_pos.bin', 'data/mesh_idx.bin']
+  const [pos, idx] = await Promise.all([`${room.data}mesh_pos.bin`, `${room.data}mesh_idx.bin`]
     .map((u) => fetch(u).then((r) => r.arrayBuffer())));
   const geom = new THREE.BufferGeometry();
   geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
@@ -178,7 +206,7 @@ const viewer = new GS.Viewer({
   sharedMemoryForWorkers: false, antialiased: true, sphericalHarmonicsDegree: 0, integerBasedSort: false,
 });
 const t = scene.splat_transform;
-viewer.addSplatScene(scene.splat_url || 'data/splat.ply', {
+viewer.addSplatScene(scene.splat_url || `${room.data}splat.ply`, {
   format: GS.SceneFormat.Ply, position: t.position, rotation: t.quaternion_xyzw, scale: [t.scale, t.scale, t.scale],
   splatAlphaRemovalThreshold: 5, showLoadingUI: true, progressiveLoad: false,
 }).then(() => { $('loading').remove(); })
@@ -315,9 +343,9 @@ $('exportBtn').addEventListener('click', () => {
     author: s.author, color: s.color, width: s.width, points: s.points,
   }));
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([JSON.stringify({ format: 'grimes-graffiti/1', strokes: data })], { type: 'application/json' }));
+  a.href = URL.createObjectURL(new Blob([JSON.stringify({ format: 'grimes-graffiti/1', room: roomId, strokes: data })], { type: 'application/json' }));
   const who = ($('author').value.trim() || 'drawings').replace(/[^\w-]+/g, '_');
-  a.download = `graffiti_${who}.json`;
+  a.download = `graffiti_${roomId}_${who}.json`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 });
@@ -329,6 +357,7 @@ $('importFile').addEventListener('change', async () => {
   let added = 0;
   try {
     const j = JSON.parse(await file.text());
+    if ((j.room || 'grimes') !== roomId) { setStatus(`! That file has drawings for the ${ROOMS[j.room]?.name || j.room} room`); return; }
     const have = new Set([...strokes.values()].map(({ data: s }) => JSON.stringify(s.points)));
     for (const s of j.strokes || []) {
       const ok = Array.isArray(s.points) && s.points.length >= 1 && s.points.length <= MAX_PTS

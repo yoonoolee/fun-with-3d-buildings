@@ -17,6 +17,6 @@ for port in range(8000, 8020):
     except OSError:
         continue
 url = f"http://localhost:{port}/"
-print(f"Grimes Graffiti is running at {url}  (close this window to stop)")
+print(f"Graffiti is running at {url}  (switch rooms in the top bar; close this window to stop)")
 threading.Timer(1.0, functools.partial(webbrowser.open, url)).start()
 httpd.serve_forever()

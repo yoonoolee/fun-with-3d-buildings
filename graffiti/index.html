@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Grimes Graffiti</title>
+<title>Graffiti</title>
 <style>
   :root { --bg:#111; --panel:rgba(20,20,24,.86); --fg:#eee; --muted:#9a9aa5; --accent:#ff4d6d; }
   html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
@@ -37,6 +37,7 @@
 <div id="cursor"></div>
 <div id="loading">Loading model…</div>
 <div id="bar">
+  <label>Room <select id="room"></select></label>
   <button id="modeLook" class="on">Look</button>
   <button id="modeDraw">Draw (G)</button>
   <label>Color <input type="color" id="color" value="#ff4d6d"></label>
