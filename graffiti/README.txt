@@ -13,7 +13,7 @@ Run
 
 Rooms
   Pick a room in the top bar (or add ?room=gateway to the address). Each room has its own model, stations and
-  drawings. Grimes: data/ (multiplayer). Gateway lecture room: data/gateway/ (drawings stay in this browser for now).
+  drawings (Grimes: data/, Gateway lecture room: data/gateway/).
 
 Controls
   Look : drag to turn, WASD to move, Q/E down/up, mouse wheel forward/back, Shift or double-tap Up/W = faster

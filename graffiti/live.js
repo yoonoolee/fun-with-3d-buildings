@@ -2,7 +2,8 @@
 // Each browser signs in anonymously; its Firebase uid is the stroke owner (only the owner can delete).
 const SDK = 'https://www.gstatic.com/firebasejs/10.14.1';
 
-export async function connectLive(config, { emulator = false } = {}) {
+// prefix: where this room lives in the database ('' = the original Grimes paths, 'rooms/<id>/' for other rooms)
+export async function connectLive(config, { emulator = false, prefix = '' } = {}) {
   const [{ initializeApp }, A, D] = await Promise.all([
     import(`${SDK}/firebase-app.js`),
     import(`${SDK}/firebase-auth.js`),
@@ -17,10 +18,10 @@ export async function connectLive(config, { emulator = false } = {}) {
   }
   const uid = (await A.signInAnonymously(auth)).user.uid;
 
-  const strokesRef = D.ref(db, 'strokes');
-  const playersRef = D.ref(db, 'players');
+  const strokesRef = D.ref(db, `${prefix}strokes`);
+  const playersRef = D.ref(db, `${prefix}players`);
   const pid = `${uid}_${Math.random().toString(36).slice(2, 10)}`; // one player per tab (tabs share the uid)
-  const meRef = D.ref(db, `players/${pid}`);
+  const meRef = D.ref(db, `${prefix}players/${pid}`);
   let connected = false;
   let lastMe = null;
   D.onValue(D.ref(db, '.info/connected'), (s) => {
@@ -45,7 +46,7 @@ export async function connectLive(config, { emulator = false } = {}) {
         return r.key;
       },
       async remove(id) {
-        try { await D.remove(D.ref(db, `strokes/${id}`)); return true; } catch { return false; }
+        try { await D.remove(D.ref(db, `${prefix}strokes/${id}`)); return true; } catch { return false; }
       },
     },
     onStrokes(add, remove) {

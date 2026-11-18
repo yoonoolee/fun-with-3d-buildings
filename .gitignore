@@ -14,5 +14,5 @@ navigation/data/L1/dataparser_transforms.json
 !graffiti/data/*.ply
 !graffiti/data/*.bin
 *-debug.log
-# Gateway model: team only, must not be published (see the gateway_graffiti package README)
-graffiti/data/gateway/
+!graffiti/data/gateway/*.ply
+!graffiti/data/gateway/*.bin

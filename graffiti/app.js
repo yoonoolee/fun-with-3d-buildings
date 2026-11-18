@@ -105,7 +105,7 @@ const liveConfig = scene.live === false ? null : emulator
   : firebaseConfig;
 if (liveConfig) {
   try {
-    live = await connectLive(liveConfig, { emulator });
+    live = await connectLive(liveConfig, { emulator, prefix: roomId === 'grimes' ? '' : `rooms/${roomId}/` });
     backend = live.backend;
   } catch (e) {
     console.error(e);
